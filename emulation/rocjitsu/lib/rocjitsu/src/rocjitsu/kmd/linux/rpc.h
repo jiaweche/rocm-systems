@@ -29,12 +29,13 @@ namespace rocjitsu {
 
 /// @brief RPC operation codes.
 enum RpcOpcode : uint16_t {
-  RPC_HANDSHAKE, ///< Initial handshake — response carries topology path.
-  RPC_OPEN,      ///< Open the KFD device.
-  RPC_CLOSE,     ///< Close the client connection.
-  RPC_MMAP,      ///< Map GPU memory — payload is RpcMmapRequest.
-  RPC_MUNMAP,    ///< Unmap GPU memory — payload is RpcMunmapRequest.
-  RPC_IOCTL,     ///< KFD ioctl passthrough — payload is RpcIoctlRequest + args.
+  RPC_HANDSHAKE,         ///< Initial handshake — response carries topology path.
+  RPC_OPEN,              ///< Open the KFD device.
+  RPC_CLOSE,             ///< Close the client connection.
+  RPC_MMAP,              ///< Map GPU memory — payload is RpcMmapRequest.
+  RPC_MUNMAP,            ///< Unmap GPU memory — payload is RpcMunmapRequest.
+  RPC_IOCTL,             ///< KFD ioctl passthrough — payload is RpcIoctlRequest + args.
+  RPC_HOST_VMA_REPLACED, ///< Update SVM policy and USERPTR VMA lifetime.
 };
 
 /// @brief Unified RPC message header (16 bytes, fixed size).
@@ -49,7 +50,7 @@ struct RpcHeader {
 };
 
 /// @brief RPC protocol version. Increment when making breaking changes.
-inline constexpr uint32_t kRpcProtocolVersion = 5;
+inline constexpr uint32_t kRpcProtocolVersion = 6;
 
 /// @brief Largest payload the daemon accepts after an RpcHeader.
 /// @details The daemon rejects — and disconnects — any client whose header
@@ -94,10 +95,19 @@ struct RpcMmapResponse {
   uint64_t mapped_addr; ///< Address the daemon mapped at (informational).
 };
 
-/// @brief munmap request payload (when opcode == RPC_MUNMAP).
+/// @brief munmap request payload.
 struct RpcMunmapRequest {
   uint64_t addr;   ///< Address of the mapping to unmap.
   uint64_t length; ///< Length in bytes to unmap.
+};
+
+/// @brief Report a client VMA change after the host syscall succeeds.
+struct RpcHostVmaReplacedRequest {
+  uint64_t addr;
+  uint64_t length;
+  // USERPTR promotion replaces its source VMA with this allocation's shared
+  // view. Keep only that handle's lifetime tracking while clearing old policy.
+  uint64_t preserve_userptr_handle;
 };
 
 static_assert(sizeof(RpcHeader) == 16);
@@ -107,6 +117,7 @@ static_assert(sizeof(RpcIoctlRequest) == 8);
 static_assert(sizeof(RpcMmapRequest) == 32);
 static_assert(sizeof(RpcMmapResponse) == 8);
 static_assert(sizeof(RpcMunmapRequest) == 16);
+static_assert(sizeof(RpcHostVmaReplacedRequest) == 24);
 
 /// @brief Send a message with optional ancillary file descriptors.
 /// @param sock Connected Unix domain socket fd.
