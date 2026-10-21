@@ -9,7 +9,7 @@
 #include "alloc.h"
 #include "bootstrap.h"
 #include "comm.h"
-#include "rma.h"
+#include "rma.h" // RCCL: multi-segment RMA registration and the owner-fd table.
 #include "rocmwrap.h"
 #include "transport.h"
 #include "transport/net_ib/rma_multiseg.h"
@@ -125,13 +125,13 @@ ncclResult_t rcclDevrGinSegmentRegType(bool isHost, int maxGlobalNumSegments, in
 #endif
 
 bool rcclDevrRmaRegistersMultiSegment(struct ncclComm* comm, int minGlobalNumSegments, int maxGlobalNumSegments) {
-  // Only RMA backends that register one MR per physical segment can take a multi-segment window,
+  // RCCL: only RMA backends that register one MR per physical segment can take a multi-segment window,
   // and the IB proxy needs the same count on every rank within its MR table.
   return ncclParamMultiSegmentRegister() && comm->rmaState.rmaProxyState.ncclRma == &ncclRmaIbProxy &&
          minGlobalNumSegments == maxGlobalNumSegments && maxGlobalNumSegments <= NCCL_RMA_MAX_SEGMENTS;
 }
 
-namespace {
+namespace { // RCCL: owner DMA-BUF fds for imported host segments, found by VA at registration.
 struct rcclHostSegmentFd {
   uintptr_t base;
   size_t size;
@@ -156,6 +156,7 @@ void rcclHostSegmentFdDeregister(int fd) {
   }
 }
 
+// RCCL: registration dups the owner's fd so the publisher can close its own.
 int rcclHostSegmentFdLookup(uintptr_t addr, size_t len, uint64_t* offset) {
   std::lock_guard<std::mutex> lock(rcclHostSegmentFdsMutex);
   for (const rcclHostSegmentFd& e : rcclHostSegmentFds) {
