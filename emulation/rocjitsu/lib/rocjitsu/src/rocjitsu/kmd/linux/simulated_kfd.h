@@ -365,9 +365,11 @@ public:
   [[nodiscard]] int get_mmap_memfd(off_t offset) const;
 
   void setup_topology(const Sysfs::GpuInfo &gpu);
-  void setup_topology(const config::KfdDeviceConfig &dev, uint32_t num_xcc);
+  void setup_topology(const config::KfdDeviceConfig &dev, uint32_t num_xcc,
+                      const config::PciDeviceConfig &pci = {});
   void setup_topology(const std::vector<config::KfdDeviceConfig> &devs, uint32_t num_xcc,
-                      bool publish_peer_links = true, bool strict_render_minor = false);
+                      bool publish_peer_links = true, bool strict_render_minor = false,
+                      const config::PciDeviceConfig &pci = {});
   /// @brief Whether render-node opens must match a configured minor exactly.
   /// @details False preserves the legacy single-GPU fallback that claims other
   /// render minors; manifests and multi-GPU sessions use exact matching.

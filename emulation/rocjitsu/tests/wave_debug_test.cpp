@@ -1533,6 +1533,44 @@ TEST(WaveDebugTest, CwsrSerializationRoundTripsThroughDbgapiLayout) {
   EXPECT_EQ(mem, original_mem);
 }
 
+// rocm-dbgapi applies each COMPUTE_RELAUNCH state to following wave words.
+// A large LDS group must not make unrelated groups consume the same stride.
+TEST(WaveDebugTest, CwsrUsesGroupLdsStateChanges) {
+  constexpr uint64_t kCtxBase = 0x400000000ULL;
+  constexpr uint32_t kAreaSize = 0x4000;
+  for (const auto arch : {ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA5}) {
+    SCOPED_TRACE(static_cast<int>(arch));
+    std::vector<kmd::CwsrWaveState> waves = {make_wave(1, 0x1000), make_wave(2, 0x2000),
+                                             make_wave(3, 0x3000)};
+    for (size_t i = 0; i < waves.size(); ++i)
+      waves[i].group_ids[0] = static_cast<uint32_t>(i + 1);
+    waves[0].lds.resize(4096, 0x5a);
+
+    std::map<uint64_t, uint32_t> mem;
+    auto write32 = [&](uint64_t address, uint32_t value) { mem[address] = value; };
+    auto read32 = [&](uint64_t address) -> uint32_t {
+      auto it = mem.find(address);
+      return it == mem.end() ? 0u : it->second;
+    };
+    const auto layout = kmd::serialize_queue_cwsr(kCtxBase, kAreaSize, waves, write32, arch);
+    ASSERT_TRUE(layout.ok);
+    const uint32_t state_words = arch == ROCJITSU_CODE_ARCH_CDNA5 ? 2 : 1;
+    EXPECT_EQ(layout.control_stack_size, (2 + 2 * state_words + waves.size()) * sizeof(uint32_t));
+    if (arch == ROCJITSU_CODE_ARCH_CDNA4) {
+      const auto parsed = parse_cwsr(mem, kCtxBase);
+      ASSERT_EQ(parsed.size(), waves.size());
+      EXPECT_EQ(parsed[0].lds.size(), 5120u);
+      EXPECT_TRUE(parsed[1].lds.empty());
+      EXPECT_TRUE(parsed[2].lds.empty());
+    }
+    ASSERT_TRUE(kmd::deserialize_queue_cwsr(kCtxBase, kAreaSize, waves, read32, arch));
+    EXPECT_EQ(waves[0].lds.size(), arch == ROCJITSU_CODE_ARCH_CDNA5 ? 4096u : 5120u);
+    EXPECT_TRUE(waves[1].lds.empty());
+    EXPECT_TRUE(waves[2].lds.empty());
+    EXPECT_EQ(waves[0].lds[0], 0x5a);
+  }
+}
+
 // rocm-dbgapi carves 32-byte instruction buffers out of a per-queue "debugger
 // memory" region declared in the context-save header (debug_offset/size at byte
 // 16/20). It aborts displaced stepping if that region is absent, so the

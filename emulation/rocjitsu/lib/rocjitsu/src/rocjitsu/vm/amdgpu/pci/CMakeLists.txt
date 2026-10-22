@@ -4,10 +4,12 @@
 # Device-side model of a PCI-attached GPU: the bus surface a guest driver sees,
 # and the diagnostics for the registers it touches. Free of any VMM dependency,
 # so every transport under vmm/ shares it.
+# KFD topology needs the resolved PCI aperture without linking the VFIO PCI model.
 set(RJ_IP_DISCOVERY_SOURCES
     ip_discovery.cpp
     ip_discovery_profile.cpp
     gpu_generation_registry.cpp
+    gpu_pci_device_spec.cpp
 )
 
 rj_add_object_library(rocjitsu_ip_discovery ${RJ_IP_DISCOVERY_SOURCES})
@@ -16,7 +18,6 @@ set(RJ_PCI_SOURCES
     register_symbols.cpp
     bar_access_trace.cpp
     scratch_pci_device.cpp
-    gpu_pci_device_spec.cpp
     graphics_block_model.cpp
     register_aperture.cpp
     ip_block_model.cpp
