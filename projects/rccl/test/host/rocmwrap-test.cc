@@ -116,7 +116,7 @@ static bool RocmWrapTestReadKernelConfig(std::string* content, char* pathOut, si
 
 namespace {
 
-constexpr int kKernel_6_8 = KERNEL_VERSION_CODE(6, 8);
+constexpr int kKernel_6_8 = NCCL_KERNEL_VERSION_CODE(6, 8);
 constexpr int kCuMemDriverVersion = ROCM_VER_7_12_60540;  // inside NCCL_CUMEM_VERSION_SUPPORTED
 constexpr int kOldDriverVersion = 70002000;               // 7.0.2, below the backport window
 
@@ -442,7 +442,6 @@ TEST_F(RocmwrapMicrotest, CapabilityCheck_EachCheapGateFailureReturnsZeroWithout
     const char* warn;
   };
   const std::vector<Case> cases = {
-    {"kernel 6.7", [] { SetKernelRelease("6.7.12"); }, "requires Linux kernel >= 6.8"},
     {"driver 7.0.2",
      [] {
        g_driverGetVersion = [](int* v) {
@@ -472,7 +471,31 @@ TEST_F(RocmwrapMicrotest, CapabilityCheck_KernelExactly6_8Passes) {
   InstallVmm(log);
   EXPECT_EQ(ncclCuMemCapabilityCheck(1), 1);
   EXPECT_FALSE(Logged(NCCL_LOG_WARN, "kernel"));
-  static_assert(kKernel_6_8 == ((6 << 16) | (8 << 8)), "KERNEL_VERSION_CODE layout");
+  EXPECT_FALSE(Logged(NCCL_LOG_INFO, "may not be performant"));
+  static_assert(kKernel_6_8 == ((6 << 16) | (8 << 8)), "NCCL_KERNEL_VERSION_CODE layout");
+}
+
+// Below 6.8 the kernel is only a performance advisory: the probe still runs and decides the result.
+TEST_F(RocmwrapMicrotest, CapabilityCheck_KernelBelow6_8IsAdvisoryOnly) {
+  for (int64_t param : {int64_t{-2}, int64_t{1}}) {
+    SCOPED_TRACE(param);
+    Reset();
+    g_params["CUMEM_ENABLE"] = param;
+    SetKernelRelease("6.7.12");
+    VmmLog log;
+    InstallVmm(log);
+    EXPECT_EQ(ncclCuMemCapabilityCheck(1), 1);
+    EXPECT_FALSE(log.calls.empty());
+    EXPECT_FALSE(Logged(NCCL_LOG_WARN, "kernel"));
+    EXPECT_TRUE(Logged(NCCL_LOG_INFO, "may not be performant"));
+  }
+}
+
+TEST_F(RocmwrapMicrotest, CapabilityCheck_KernelBelow6_8WithCuMemDisabledSkipsTheAdvisory) {
+  g_params["CUMEM_ENABLE"] = 0;
+  SetKernelRelease("6.7.12");
+  EXPECT_EQ(ncclCuMemCapabilityCheck(1), 1);
+  EXPECT_FALSE(Logged(NCCL_LOG_INFO, "may not be performant"));
 }
 
 TEST_F(RocmwrapMicrotest, CapabilityCheck_BackportDriverWindowIsAccepted) {
@@ -541,6 +564,23 @@ TEST_F(RocmwrapMicrotest, RuntimeSupported_SkipsTheArchGateAndRunsTheCheckOnce) 
     },
     ::testing::ExitedWithCode(0), "");
 }
+
+#if NCCL_CUMEM_VERSION_SUPPORTED(HIP_VERSION)
+// NCCL_CUMEM_ENABLE=1 on a non-gfx1250 GPU with kernel < 6.8 (MI308X on 6.6) must still enable cuMem.
+TEST_F(RocmwrapMicrotest, CuMemEnable_ForceOnBelowKernel6_8EnablesCuMem) {
+  EXPECT_EXIT(
+    {
+      SetArch("gfx942");
+      SetKernelRelease("6.6.119-47.8.tl4.x86_64");
+      g_params["CUMEM_ENABLE"] = 1;
+      VmmLog log;
+      InstallVmm(log);
+      bool ok = ncclCuMemEnable() == 1 && !log.calls.empty() && !Logged(NCCL_LOG_WARN, "kernel");
+      std::exit(ok ? 0 : 1);
+    },
+    ::testing::ExitedWithCode(0), "");
+}
+#endif
 
 // ncclCuMemEnable / ncclCuMemHostEnable (out-of-window HIP_VERSION arm)
 
